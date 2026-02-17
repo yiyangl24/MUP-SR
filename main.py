@@ -16,7 +16,7 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--dataname', default='Electronics', type=str)
-    parser.add_argument('--device', default='cuda:1', type=str)
+    parser.add_argument('--device', default='cuda:0', type=str)
     parser.add_argument('--seed', default=42, type=int)
 
     parser.add_argument('--num_epochs', default=1000, type=int)
@@ -27,13 +27,13 @@ def get_args():
     parser.add_argument('--num_blocks', default=2, type=int)
     parser.add_argument('--num_heads', default=1, type=int)
     parser.add_argument('--hidden_units', default=128, type=int)
-    parser.add_argument('--llm_units', default=3072, type=int)
+    parser.add_argument('--llm_units', default=1024, type=int)
     parser.add_argument('--l2_emb', default=0.0, type=float)
 
     parser.add_argument('--llm_init', action='store_true')
     parser.add_argument('--gated', action='store_true')
     parser.add_argument('--tau', default=1, type=float)
-    parser.add_argument('--beta', default=0.005, type=float)
+    parser.add_argument('--beta', default=10, type=float)
 
     args = parser.parse_args()
 
@@ -123,7 +123,8 @@ def train(args):
     sampler.close()
     print("Done")
 
-
+    with open('result.txt', 'a') as f:
+        f.write(f'{args.beta} {ndcg:.4f} {hr:.4f} {ndcg_20:.4f} {hr_20:.4f}\n')
 
 
 if __name__ == '__main__':
@@ -132,10 +133,13 @@ if __name__ == '__main__':
 
     args = get_args()
 
-    fix_random_seed(args.seed)
+    # fix_random_seed(args.seed)
 
-    train(args)
-
+    for beta in [0.9]:
+        for seed in [42, 43, 44]:
+                fix_random_seed(seed)
+                args.beta = beta
+                train(args)
 
 
 
