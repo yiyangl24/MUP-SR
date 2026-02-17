@@ -9,7 +9,7 @@
    ```
 
 2. 下载Amazon Electronics [Download Link](https://cseweb.ucsd.edu/~jmcauley/datasets/amazon_v2/) ，放入`./data/raw`
-3. 下载LLMs，`LLaMA 3.2 3B -Instruct`
+3. 下载Embedding模型，`bge-large-en-v1.5`和  LLMs   `LLaMA 3.2 3B -Instruct`
 
 ### Run
 
@@ -49,8 +49,9 @@
 |             Model              | NDCG@10 | HR@10  | NDCG@20 | HR@20  |
 | :----------------------------: | :-----: | :----: | :-----: | :----: |
 |            vanilla             | 0.2124  | 0.3406 | 0.2427  | 0.4609 |
-|       vanilla + llm_init       | 0.2181  | 0.3747 | 0.2526  | 0.5115 |
-| vanilla+llm_init_gate 0.005 10 | 0.2322  | 0.3922 | 0.2657  | 0.5283 |
+|       vanilla + llm_init       | 0.2488  | 0.3970 | 0.2803  | 0.5224 |
+| vanilla+llm_init_gate 0.005 10 | 0.2677  | 0.4313 | 0.3003  | 0.5609 |
+
 
 
 
