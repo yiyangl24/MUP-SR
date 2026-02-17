@@ -4,12 +4,10 @@ import torch
 import pickle
 import numpy as np
 
-
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 
-from peft import prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, AutoConfig
 
 
 class MyDataset(Dataset):
@@ -24,41 +22,21 @@ class MyDataset(Dataset):
         return self.items[idx]
 
 
-def get_token_idx(llm_tokens, token_id):
-    token_idx = []
-    for i in range(len(llm_tokens['input_ids'])):
-        idx_tensor = (llm_tokens['input_ids'][i] == token_id).nonzero().view(-1)
-        token_idx.append(idx_tensor)
-    return token_idx
-
-
-
 if __name__ == '__main__':
 
     device = torch.device('cuda:1')
 
-    llm_path = '../Llama-3.2-3B-Instruct'
+    llm_path = '../bge-large-en-v1.5'
 
-    llm = AutoModelForCausalLM.from_pretrained(llm_path, device_map=device, torch_dtype=torch.float16, load_in_8bit=True)
-    tokenizer = AutoTokenizer.from_pretrained(llm_path, use_fast=False, )
+    llm = AutoModel.from_pretrained(llm_path).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(llm_path)
 
-    tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-    tokenizer.add_special_tokens({'bos_token': '</s>'})
-    tokenizer.add_special_tokens({'eos_token': '</s>'})
-    tokenizer.add_special_tokens({'additional_special_tokens': ['[ItemOut]']})
+    config = AutoConfig.from_pretrained(llm_path)
 
-    llm.resize_token_embeddings(len(tokenizer))
+    print("config max_position_embeddings:", config.max_position_embeddings)
+    print("tokenizer model_max_length:", tokenizer.model_max_length)
 
-    token_id = tokenizer('[ItemOut]', return_tensors='pt', add_special_tokens=False).input_ids.item()
-
-    with torch.no_grad():
-        token_embedding = llm.get_input_embeddings().weight
-        token_embedding[token_id] = token_embedding.mean(dim=0)
-
-    llm = prepare_model_for_kbit_training(llm)
-
-    for name, param in llm.named_parameters():
-        param.requires_grad = False
+    llm.eval()
 
     with open('./data/processed/Electronics_meta.pkl', 'rb') as f:
         item_prompt = pickle.load(f)
@@ -75,21 +53,19 @@ if __name__ == '__main__':
 
     item_embedding = {}
 
-    instruct_template = "\nBased on the above information, generate item representation token: [ItemOut]"
+    instruct_template = "Represent this item for recommendation:\n"
 
     max_input_length = 4096
 
     for asins, prompts in tqdm(dataloader):
         prompts = list(prompts)
-        prompts = [p + copy.deepcopy(instruct_template) for p in prompts]
-        asins = list(asins)
-        inputs = tokenizer(prompts, return_tensors='pt', padding='longest', truncation=True, max_length=max_input_length).to(device)
-        embeddings = llm.get_input_embeddings()(inputs['input_ids'])
-        outputs = llm.forward(inputs_embeds=embeddings, output_hidden_states=True)
-        idx = get_token_idx(inputs, token_id)
-
-        for i, asin in zip(range(len(idx)), asins):
-            i_embedding = outputs.hidden_states[-1][i, idx[i]].mean(axis=0)
+        prompts = [instruct_template + p for p in prompts]
+        inputs = tokenizer(prompts, return_tensors='pt', padding=True, truncation=True, max_length=max_input_length).to(device)
+        with torch.no_grad():
+            outputs = llm(**inputs)
+            embeddings = outputs[0][:, 0]
+        embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+        for asin, i_embedding in zip(asins, embeddings):
             item_embedding[asin] = i_embedding.detach().cpu().tolist()
 
     with open('./data/processed/Electronics.pkl', 'rb') as f:
