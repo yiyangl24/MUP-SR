@@ -12,15 +12,7 @@ from collections import defaultdict
 from sklearn.cluster import KMeans
 
 from peft import prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
-def get_token_idx(llm_tokens, token_id):
-    token_idx = []
-    for i in range(len(llm_tokens['input_ids'])):
-        idx_tensor = (llm_tokens['input_ids'][i] == token_id).nonzero().view(-1)
-        token_idx.append(idx_tensor)
-    return token_idx
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModel
 
 
 import time
@@ -39,12 +31,12 @@ if __name__ == '__main__':
     batch_size = 30
 
     # clusering
+
     with open('./data/processed/' + dataname + '_embedding.pkl', 'rb') as f:
         llm_embedding = pickle.load(f)
 
     model = KMeans(n_clusters=n_clusters)
     model.fit(llm_embedding)
-
     y_pred = model.predict(llm_embedding)
 
     cluster_map = dict(zip(range(1, len(y_pred) + 1), y_pred))
@@ -69,15 +61,9 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens({'pad_token': '[PAD]'})
     tokenizer.add_special_tokens({'bos_token': '</s>'})
     tokenizer.add_special_tokens({'eos_token': '</s>'})
-    tokenizer.add_special_tokens({'additional_special_tokens': ['[UserProfile]']})
-
+    tokenizer.add_special_tokens({'unk_token': '</s>'})
     llm.resize_token_embeddings(len(tokenizer))
 
-    token_id = tokenizer('[UserProfile]', return_tensors='pt', add_special_tokens=False).input_ids.item()
-
-    with torch.no_grad():
-        token_embedding = llm.get_input_embeddings().weight
-        token_embedding[token_id] = token_embedding.mean(dim=0)
 
     llm = prepare_model_for_kbit_training(llm)
 
@@ -89,10 +75,8 @@ if __name__ == '__main__':
         'global': "Assume you are an consumer and there are preference demonstrations from several aspects are as follows:\n {}. Please illustrate your preference with less than 100 words."
     }
 
-
     all_session_prompt = []
     all_session_uid = []
-
 
     llm.eval()
 
@@ -209,6 +193,10 @@ if __name__ == '__main__':
                     pickle.dump(user_profile, f, pickle.HIGHEST_PROTOCOL)
 
 
+    del llm
+    del tokenizer
+
+
     user_profile_embedding = {}
 
     profile_embedding_file = './data/processed/' + dataname + '_profile_embedding.pkl'
@@ -218,7 +206,18 @@ if __name__ == '__main__':
 
     prompt, uid = [], []
 
-    instruct_template = "The user profile of a consumer is summarized as follows, \n{}.\n Based on the above information, generate user representation token [UserProfile]"
+    instruct_template = "Represent the profile of this user for recommendation:\n{}"
+
+    device = torch.device('cuda:1')
+
+    llm_path = '../bge-large-en-v1.5'
+
+    llm = AutoModel.from_pretrained(llm_path).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(llm_path)
+
+    max_input_length = 512
+
+    llm.eval()
 
     batch_size = 30
 
@@ -229,18 +228,14 @@ if __name__ == '__main__':
         uid.append(user_id)
 
         if len(uid) == batch_size or i == len(user_profile) - 1:
-            inputs = tokenizer(prompt, return_tensors='pt', padding='longest', truncation=True, max_length=max_input_length).to(device)
-            embeddings = llm.get_input_embeddings()(inputs['input_ids'])
+            inputs = tokenizer(prompt, return_tensors='pt', padding=True, truncation=True).to(device)
             with torch.no_grad():
-                outputs = llm.forward(inputs_embeds=embeddings, output_hidden_states=True)
-            idx = get_token_idx(inputs, token_id)
+                outputs = llm(**inputs)
+                embeddings = outputs[0][:, 0]
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
-            for j in range(len(uid)):
-                user_embedding = outputs.hidden_states[-1][j, idx[j]].mean(axis=0)
-                user_profile_embedding[uid[j]] = user_embedding.detach().cpu().tolist()
-
-            del inputs, outputs
-            torch.cuda.empty_cache()
+            for u, u_embedding in zip(uid, embeddings):
+                user_profile_embedding[u] = u_embedding.detach().cpu().tolist()
 
             uid, prompt = [], []
 
