@@ -58,14 +58,9 @@ if __name__ == '__main__':
     llm = AutoModelForCausalLM.from_pretrained(llm_path, device_map=device, torch_dtype=torch.float16, load_in_8bit=True)
     tokenizer = AutoTokenizer.from_pretrained(llm_path, use_fast=False, padding_side='left')
 
-    tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-    tokenizer.add_special_tokens({'bos_token': '</s>'})
-    tokenizer.add_special_tokens({'eos_token': '</s>'})
-    tokenizer.add_special_tokens({'unk_token': '</s>'})
-    llm.resize_token_embeddings(len(tokenizer))
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-
-    llm = prepare_model_for_kbit_training(llm)
 
     for name, param in llm.named_parameters():
         param.requires_grad = False
